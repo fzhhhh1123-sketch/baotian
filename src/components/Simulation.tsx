@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Matter from 'matter-js';
-import { PlacedPart } from '../lib/types';
+import { Part } from '../lib/types';
 import * as Icons from 'lucide-react';
 
 interface SimulationProps {
-  parts: PlacedPart[];
+  parts: Part[];
   onClose: () => void;
 }
 
@@ -12,7 +12,8 @@ export function Simulation({ parts, onClose }: SimulationProps) {
   const sceneRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<Matter.Engine | null>(null);
   const renderRef = useRef<Matter.Render | null>(null);
-  const [stats, setStats] = useState({ distance: 0, speed: 0, maxSpeed: 0 });
+  const [stats, setStats] = useState({ distance: 0, speed: 0, kills: 0 });
+  const controlsRef = useRef({ left: false, right: false, fire: false });
 
   useEffect(() => {
     if (!sceneRef.current) return;
@@ -28,178 +29,179 @@ export function Simulation({ parts, onClose }: SimulationProps) {
         width: sceneRef.current.clientWidth,
         height: sceneRef.current.clientHeight,
         wireframes: false,
-        background: '#0c0d0e',
+        background: '#0D0D0D',
       },
     });
     renderRef.current = render;
 
-    // Ground - endless floor
-    const ground = Matter.Bodies.rectangle(4000, 580, 8000, 40, { 
+    // Ground
+    const ground = Matter.Bodies.rectangle(10000, 580, 20000, 40, { 
       isStatic: true, 
-      render: { fillStyle: '#1a1b1e' }
+      friction: 1,
+      render: { fillStyle: '#111' },
+      label: 'ground'
     });
-    
-    // Create Obstacles
-    const obstacles = Array.from({ length: 20 }).map((_, i) => (
-      Matter.Bodies.rectangle(1000 + i * 800, 540, 60, 40, { 
-        render: { fillStyle: '#2a2c30' } 
-      })
-    ));
+    Matter.World.add(world, ground);
 
-    Matter.World.add(world, [ground, ...obstacles]);
-
-    // Construct Vehicle
+    // Vehicle
     const composite = Matter.Composite.create();
-    
-    // Find chassis components
-    const chassisParts = parts.filter(p => p.type === 'chassis');
-    const wheelParts = parts.filter(p => p.type === 'wheel');
-    const otherParts = parts.filter(p => p.type !== 'chassis' && p.type !== 'wheel');
+    const chassis = parts.find(p => p.type === 'chassis');
+    const enginePart = parts.find(p => p.type === 'engine');
+    const weapon = parts.find(p => p.type === 'weapon');
+    const wheels: Matter.Body[] = [];
 
-    const bodiesMap = new Map<string, Matter.Body>();
+    let chassisBody: Matter.Body | null = null;
 
-    // 1. Create Chassis Blocks
-    chassisParts.forEach(p => {
-      const body = Matter.Bodies.rectangle(
-        400 + p.x * 20, 
-        400 + p.y * 20, 
-        p.gridSize.w * 20, 
-        p.gridSize.h * 20, 
-        { 
-          mass: p.weight / 100,
-          render: { fillStyle: '#f27d26' }
-        }
-      );
-      bodiesMap.set(p.uniqueId, body);
-      Matter.Composite.add(composite, body);
-    });
+    if (chassis) {
+      chassisBody = Matter.Bodies.rectangle(400, 400, 140, 60, {
+        mass: chassis.weight / 10,
+        friction: 0.5,
+        render: { fillStyle: '#FF9500' },
+        label: 'vehicle'
+      });
+      Matter.Composite.add(composite, chassisBody);
 
-    // 2. Add other parts (weapons, engines) fixed to chassis
-    otherParts.forEach(p => {
-      // Find nearest chassis part to attach to
-      const parent = chassisParts[0]; // Simplification
-      if (parent) {
-        const body = Matter.Bodies.rectangle(
-          400 + p.x * 20, 
-          400 + p.y * 20, 
-          p.gridSize.w * 20, 
-          p.gridSize.h * 20, 
-          { 
-            mass: p.weight / 100,
-            render: { fillStyle: '#8e9299' }
-          }
-        );
-        bodiesMap.set(p.uniqueId, body);
-        Matter.Composite.add(composite, body);
-        
-        // Weld to chassis
-        const constraint = Matter.Constraint.create({
-          bodyA: bodiesMap.get(parent.uniqueId),
-          bodyB: body,
-          pointA: { x: (p.x - parent.x) * 20, y: (p.y - parent.y) * 20 },
-          stiffness: 1,
-          length: 0
+      // Wheels
+      [ -50, 50 ].forEach(x => {
+        const wBody = Matter.Bodies.circle(400 + x, 430, 28, {
+          friction: 1,
+          restitution: 0.2,
+          render: { fillStyle: '#fff' },
+          label: 'wheel'
         });
-        Matter.Composite.add(composite, constraint);
-      }
-    });
+        wheels.push(wBody);
+        Matter.Composite.add(composite, wBody);
+        Matter.Composite.add(composite, Matter.Constraint.create({
+          bodyA: chassisBody!, bodyB: wBody, stiffness: 0.1, length: 10, pointA: { x, y: 30 }
+        }));
+      });
+    }
 
-    // 3. Add Wheels
-    wheelParts.forEach(p => {
-      const parent = chassisParts[0];
-      if (parent) {
-        const wheel = Matter.Bodies.circle(
-          400 + p.x * 20 + 10, 
-          400 + (p.y + 1) * 20, 
-          15, 
-          { 
-            friction: 0.9,
-            restitution: 0.5,
-            render: { fillStyle: '#ffffff' }
-          }
-        );
-        Matter.Composite.add(composite, wheel);
-
-        const constraint = Matter.Constraint.create({
-          bodyA: bodiesMap.get(parent.uniqueId),
-          bodyB: wheel,
-          pointA: { x: (p.x - parent.x) * 20 + 10, y: (p.y - parent.y) * 20 + 20 },
-          stiffness: 0.3,
-          length: 5,
-          render: { visible: true, strokeStyle: '#2a2c30' }
-        });
-        Matter.Composite.add(composite, constraint);
-
-        // Apply engine power
-        const powerIndex = parts.reduce((acc, p) => acc + (p.power || 0), 0);
-        setInterval(() => {
-          Matter.Body.setAngularVelocity(wheel, 0.15 + (powerIndex / 1000));
-        }, 100);
-      }
-    });
+    // Enemies (Zombies)
+    const enemies: Matter.Body[] = [];
+    for (let i = 0; i < 50; i++) {
+       const z = Matter.Bodies.rectangle(1000 + i * 400 + Math.random() * 200, 500, 30, 60, {
+         render: { fillStyle: '#4ADE80' },
+         label: 'zombie',
+         friction: 0.1
+       });
+       enemies.push(z);
+    }
+    Matter.World.add(world, enemies);
 
     Matter.World.add(world, composite);
-
-    // Runner
     const runner = Matter.Runner.create();
     Matter.Runner.run(runner, engine);
     Matter.Render.run(render);
 
-    // Camera follow (simplified)
-    const updateStats = () => {
-      const mainChassis = bodiesMap.get(chassisParts[0]?.uniqueId || '');
-      if (mainChassis) {
-        Matter.Render.lookAt(render, {
-          min: { x: mainChassis.position.x - 400, y: 0 },
-          max: { x: mainChassis.position.x + 400, y: 600 }
-        });
-        
-        setStats(prev => ({
-          distance: Math.floor(mainChassis.position.x / 100),
-          speed: Math.floor(mainChassis.velocity.x * 10),
-          maxSpeed: Math.max(prev.maxSpeed, Math.floor(mainChassis.velocity.x * 10))
-        }));
-      }
-      requestAnimationFrame(updateStats);
+    // Input handling
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'a' || e.key === 'ArrowLeft') controlsRef.current.left = true;
+      if (e.key === 'd' || e.key === 'ArrowRight') controlsRef.current.right = true;
+      if (e.key === ' ') controlsRef.current.fire = true;
     };
-    const reqId = requestAnimationFrame(updateStats);
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'a' || e.key === 'ArrowLeft') controlsRef.current.left = false;
+      if (e.key === 'd' || e.key === 'ArrowRight') controlsRef.current.right = false;
+      if (e.key === ' ') controlsRef.current.fire = false;
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+
+    // projectiles
+    const projectiles: Matter.Body[] = [];
+    let lastFire = 0;
+
+    const gameLoop = () => {
+      if (!chassisBody) return;
+
+      // Apply forces based on controls
+      if (controlsRef.current.right) {
+        wheels.forEach(w => Matter.Body.setAngularVelocity(w, 0.3 * (enginePart?.power ? 1.5 : 1)));
+      } else if (controlsRef.current.left) {
+        wheels.forEach(w => Matter.Body.setAngularVelocity(w, -0.3));
+      }
+
+      // Fire weapon
+      if (controlsRef.current.fire && weapon && Date.now() - lastFire > 300) {
+        const bullet = Matter.Bodies.rectangle(chassisBody.position.x + 80, chassisBody.position.y - 10, 20, 5, {
+          render: { fillStyle: '#FF9500' },
+          label: 'projectile'
+        });
+        Matter.Body.setVelocity(bullet, { x: 25, y: -2 });
+        Matter.World.add(world, bullet);
+        projectiles.push(bullet);
+        lastFire = Date.now();
+      }
+
+      // Collision Check for Kills
+      Matter.Events.on(engine, 'collisionStart', (event) => {
+        event.pairs.forEach(pair => {
+          if (pair.bodyA.label === 'projectile' && pair.bodyB.label === 'zombie') {
+            Matter.World.remove(world, pair.bodyB);
+            setStats(s => ({...s, kills: s.kills + 1}));
+          } else if (pair.bodyB.label === 'projectile' && pair.bodyA.label === 'zombie') {
+            Matter.World.remove(world, pair.bodyA);
+            setStats(s => ({...s, kills: s.kills + 1}));
+          }
+        });
+      });
+
+      Matter.Render.lookAt(render, {
+        min: { x: chassisBody.position.x - 400, y: 0 },
+        max: { x: chassisBody.position.x + 400, y: 600 }
+      });
+
+      setStats(prev => ({
+        ...prev,
+        distance: Math.floor(chassisBody!.position.x / 100),
+        speed: Math.floor(Math.abs(chassisBody!.velocity.x) * 10)
+      }));
+
+      requestAnimationFrame(gameLoop);
+    };
+
+    const animId = requestAnimationFrame(gameLoop);
 
     return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
       Matter.Engine.clear(engine);
       Matter.Render.stop(render);
       Matter.World.clear(world, false);
-      cancelAnimationFrame(reqId);
+      cancelAnimationFrame(animId);
       if (render.canvas) render.canvas.remove();
     };
   }, [parts]);
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-black">
-      <div className="p-4 bg-[#151619] border-b border-[#2a2c30] flex justify-between items-center">
-        <div className="flex gap-8">
+      <div className="p-6 bg-[#0D0D0D] border-b border-[#333] flex justify-between items-center h-24">
+        <div className="flex gap-12">
           <div>
-             <span className="mono-label">DISTANCE</span>
-             <div className="text-2xl font-mono text-[#f27d26]">{stats.distance}M</div>
+             <span className="mono-label block mb-1">TRAVEL DISTANCE</span>
+             <div className="text-3xl font-black text-[#FF9500] leading-none text-right">{stats.distance}M</div>
           </div>
           <div>
-             <span className="mono-label">SPEED</span>
-             <div className="text-2xl font-mono text-[#f27d26]">{stats.speed}KM/H</div>
+             <span className="mono-label block mb-1">VELOCITY</span>
+             <div className="text-3xl font-black text-white leading-none text-right">{stats.speed}KM/H</div>
           </div>
           <div>
-             <span className="mono-label">MAX SPEED</span>
-             <div className="text-2xl font-mono text-white">{stats.maxSpeed}KM/H</div>
+             <span className="mono-label block mb-1">WASTE KILLS</span>
+             <div className="text-3xl font-black text-[#4ADE80] leading-none text-right">{stats.kills}</div>
           </div>
         </div>
-        <button onClick={onClose} className="btn-outline flex items-center gap-2">
-          <Icons.ChevronLeft /> BACK TO GARAGE
-        </button>
-      </div>
-
-      <div ref={sceneRef} className="flex-1 w-full relative">
-        <div className="absolute top-4 left-4 bg-black/60 p-3 border border-[#2a2c30] text-[10px] mono-label">
-           SIMULATION RUNNING... AUTO-THRUST ENGAGED
+        <div className="flex items-center gap-6">
+           <div className="text-[10px] mono-label max-w-[200px] leading-tight opacity-50">
+             [A/D] MOVE<br/>
+             [SPACE] FIRE WEAPON
+           </div>
+           <button onClick={onClose} className="h-12 px-8 bg-white text-black font-black uppercase skew-x-[-10deg] hover:bg-[#FF9500] transition-all">
+             RETURN TO GARAGE
+           </button>
         </div>
       </div>
+      <div ref={sceneRef} className="flex-1 w-full relative" />
     </div>
   );
 }

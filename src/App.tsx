@@ -3,32 +3,34 @@ import { AnimatePresence } from 'motion/react';
 import { PartsBin } from './components/PartsBin';
 import { Workshop } from './components/Workshop';
 import { Simulation } from './components/Simulation';
-import { Part, PlacedPart } from './lib/types';
+import { Part, EquippedParts } from './lib/types';
 import * as Icons from 'lucide-react';
 
+const EMPTY_EQUIPMENT: EquippedParts = {
+  chassis: null,
+  wheel: null,
+  engine: null,
+  weapon: null,
+  armor: null
+};
+
 export default function App() {
-  const [placedParts, setPlacedParts] = useState<PlacedPart[]>([]);
+  const [equipment, setEquipment] = useState<EquippedParts>(EMPTY_EQUIPMENT);
   const [isSimulating, setIsSimulating] = useState(false);
   const [showIntro, setShowIntro] = useState(true);
 
-  const handlePlacePart = (part: Part, x: number, y: number) => {
-    const newPlacedPart: PlacedPart = {
-      ...part,
-      x,
-      y,
-      uniqueId: Math.random().toString(36).substr(2, 9)
-    };
-    setPlacedParts(prev => [...prev, newPlacedPart]);
+  const handleEquip = (part: Part) => {
+    setEquipment(prev => ({
+      ...prev,
+      [part.type]: part
+    }));
   };
 
-  const handleRemovePart = (uniqueId: string) => {
-    setPlacedParts(prev => prev.filter(p => p.uniqueId !== uniqueId));
-  };
-
-  const handleDragStart = (e: React.DragEvent, part: Part) => {
-    if (e.dataTransfer) {
-      e.dataTransfer.setData('application/json', JSON.stringify(part));
-    }
+  const handleRemove = (type: keyof EquippedParts) => {
+    setEquipment(prev => ({
+      ...prev,
+      [type]: null
+    }));
   };
 
   useEffect(() => {
@@ -87,18 +89,17 @@ export default function App() {
 
       {/* Main Layout */}
       <main className="flex-1 flex overflow-hidden">
-        <PartsBin onDragStart={handleDragStart} />
+        <PartsBin onSelect={handleEquip} equippedIds={Object.values(equipment).filter((p): p is Part => p !== null).map(p => p.id)} />
         <Workshop 
-          placedParts={placedParts} 
-          onPlacePart={handlePlacePart} 
-          onRemovePart={handleRemovePart}
+          equipment={equipment} 
+          onRemove={handleRemove}
         />
       </main>
 
       {/* Simulation Overlay */}
       <AnimatePresence>
         {isSimulating && (
-          <Simulation parts={placedParts} onClose={() => setIsSimulating(false)} />
+          <Simulation parts={Object.values(equipment).filter(p => p !== null) as Part[]} onClose={() => setIsSimulating(false)} />
         )}
       </AnimatePresence>
     </div>

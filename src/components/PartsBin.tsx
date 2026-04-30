@@ -1,14 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Part, PlacedPart, INITIAL_PARTS, cn } from '../lib/types';
+import { Part, INITIAL_PARTS, cn } from '../lib/types';
 import * as Icons from 'lucide-react';
 import { generatePartLore } from '../services/geminiService';
 
 interface PartsBinProps {
-  onDragStart: (e: React.DragEvent, part: Part) => void;
+  onSelect: (part: Part) => void;
+  equippedIds: string[];
 }
 
-export function PartsBin({ onDragStart }: PartsBinProps) {
+export function PartsBin({ onSelect, equippedIds }: PartsBinProps) {
   const [selectedCategory, setSelectedCategory] = useState<Part['type'] | 'all'>('all');
   const [lore, setLore] = useState<Record<string, string>>({});
 
@@ -22,32 +23,16 @@ export function PartsBin({ onDragStart }: PartsBinProps) {
         <h2 className="font-mono text-xs font-bold uppercase tracking-widest text-white">Component Inventory</h2>
       </div>
 
-      <div className="flex flex-wrap gap-1 p-4 bg-black/20">
-        {categories.map(cat => (
-          <button
-            key={cat}
-            onClick={() => setSelectedCategory(cat)}
-            className={cn(
-              "px-2 py-1 text-[8px] mono-label border border-[#333333] cursor-pointer transition-all",
-              selectedCategory === cat ? "bg-[#FF9500] text-black border-[#FF9500]" : "hover:border-[#FF9500]"
-            )}
-          >
-            {cat}
-          </button>
-        ))}
-      </div>
-
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {filteredParts.map(part => {
           const IconComponent = (Icons as any)[part.icon.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase()).join('')] || Icons.HelpCircle;
-          const isSelected = part.type === 'chassis'; // Example for visual flair
+          const isEquipped = equippedIds.includes(part.id);
           
           return (
             <motion.div
               key={part.id}
-              layoutId={part.id}
-              draggable
-              onDragStart={(e) => onDragStart(e, part)}
+              layout
+              onClick={() => onSelect(part)}
               onMouseEnter={async () => {
                 if (!lore[part.id]) {
                   const text = await generatePartLore(part.name);
@@ -55,8 +40,8 @@ export function PartsBin({ onDragStart }: PartsBinProps) {
                 }
               }}
               className={cn(
-                "group p-3 border-l-4 transition-all cursor-grab active:cursor-grabbing relative",
-                isSelected ? "border-[#FF9500] bg-[#1a150e]" : "border-transparent bg-black/40 hover:border-[#444] hover:bg-[#1A1A1A]"
+                "group p-3 border-l-4 transition-all cursor-pointer relative",
+                isEquipped ? "border-[#FF9500] bg-[#1a150e]" : "border-transparent bg-black/40 hover:border-[#444] hover:bg-[#1A1A1A]"
               )}
             >
               <div className="flex justify-between text-[10px] font-mono text-[#888] mb-1 uppercase">
@@ -64,19 +49,13 @@ export function PartsBin({ onDragStart }: PartsBinProps) {
                 <span>{part.weight}kg</span>
               </div>
               <div className="flex items-center gap-3">
-                <IconComponent className={cn("w-4 h-4", isSelected ? "text-[#FF9500]" : "text-[#444]")} />
+                <IconComponent className={cn("w-4 h-4", isEquipped ? "text-[#FF9500]" : "text-[#444]")} />
                 <h3 className="font-bold text-white uppercase text-sm">{part.name}</h3>
               </div>
               
               <p className="mt-2 text-[10px] text-[#666] font-mono leading-tight italic">
                 // {lore[part.id] || part.description}
               </p>
-
-              {lore[part.id] && (
-                <div className="absolute top-2 right-2">
-                   <div className="w-1 h-1 rounded-full bg-[#FF9500] animate-pulse" />
-                </div>
-              )}
             </motion.div>
           );
         })}
