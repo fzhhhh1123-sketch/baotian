@@ -1,0 +1,10 @@
+{
+  "name": "Wasteland Crafter",
+  "description": "A post-apocalyptic vehicle assembly and combat-ready simulation game. Scavenge, build, and test your ultimate wasteland machine.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "AI-powered part lore",
+    "Physics-based vehicle testing",
+    "Modular assembly system"
+  ]
+}
